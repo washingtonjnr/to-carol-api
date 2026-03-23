@@ -1,13 +1,13 @@
 package com.tocarol.api.application.usecase.health;
 
-import com.tocarol.api.domain.model.HealthStatus;
+import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import com.tocarol.api.domain.model.HealthStatus;
 
 class CheckHealthServiceTest {
 
-    private final CheckHealthService service = new CheckHealthService();
+    private final CheckHealthUseCase service = new CheckHealthUseCase();
 
     @Test
     void execute_returnsStatusUp() {
