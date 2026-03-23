@@ -1,74 +1,151 @@
-# CLAUDE.md
+# Project: To Carol API
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Java 21 + Spring Boot 4.0.4 REST API — Hexagonal Architecture (Ports & Adapters).
+Handles user CRUD, permissions, and Supabase Storage integration (upload/delete images).
 
-## Build & Run Commands
+## Commands
 
 ```bash
-# Run the application
+# Run
 ./mvnw spring-boot:run
 
-# Build (compile + test)
+# Build
 ./mvnw clean install
 
 # Build without tests
 ./mvnw clean install -DskipTests
 
-# Run all tests
+# Test all
 ./mvnw test
 
-# Run a single test class
-./mvnw test -Dtest=SomeControllerTest
+# Test single class
+./mvnw test -Dtest=ClassName
 
-# Run a single test method
-./mvnw test -Dtest=SomeControllerTest#methodName
+# Test single method
+./mvnw test -Dtest=ClassName#methodName
 ```
 
 On Windows, use `mvnw.cmd` instead of `./mvnw`.
 
-## Stack
+## Environment Variables
 
-- **Java 21**, Spring Boot 4.0.4
-- **Spring Web MVC** — REST API layer
-- **Spring Data JPA** + Hibernate — data access
-- **PostgreSQL** — database (runtime driver; connection must be configured in `application.properties`)
+All secrets must be defined in `application-local.properties` (gitignored).
 
-## Architecture — Hexagonal (Ports & Adapters)
+```properties
+supabase.url=${SUPABASE_URL}
+supabase.key=${SUPABASE_API_KEY}
+supabase.storage.bucket=${SUPABASE_STORAGE_NAME}
+```
 
-Each feature lives in its own package under `com.tocarol.api.<feature>` and is split into three layers:
+Never hardcode secrets. Never commit `application-local.properties`.
+
+## Architecture
+
+Hexagonal (Ports & Adapters). Dependency rule is strict:
+
+```
+adapter  →  application  →  domain
+```
+
+Nothing in `domain/` knows about Spring, HTTP, or storage providers.
 
 ```
 com.tocarol.api/
-└── <feature>/
-    ├── domain/
-    │   ├── model/          # Pure Java entities and value objects (no framework annotations)
-    │   ├── port/
-    │   │   ├── in/         # Input ports: use case interfaces (e.g. CreateProductUseCase)
-    │   │   └── out/        # Output ports: repository/gateway interfaces (e.g. ProductRepository)
-    │   └── service/        # Domain services (optional, stateless business logic)
-    ├── application/
-    │   └── service/        # Use case implementations (@Service), orchestrate domain + output ports
-    └── adapter/
-        ├── in/
-        │   └── web/        # REST controllers (@RestController), DTOs, mappers
-        └── out/
-            └── persistence/ # JPA entities, Spring Data repositories, mappers to/from domain model
+├── domain/
+│   ├── model/               # Pure Java — User, Permission, Image (no annotations)
+│   ├── port/
+│   │   ├── in/              # Use case interfaces — CreateUserUseCase, UploadImageUseCase
+│   │   └── out/             # Gateway interfaces — UserGateway, ImageStorageGateway
+│   └── exception/           # Domain exceptions — UserNotFoundException, UnauthorizedException
+│
+├── application/
+│   └── usecase/             # Implements input ports (@Service)
+│                            # user/ — CreateUser, UpdateUser, DeleteUser, GetUser
+│                            # image/ — UploadImage, DeleteImage, ListImages
+│                            # permission/ — AssignPermission, RevokePermission
+│
+└── adapter/
+    ├── in/
+    │   └── http/            # @RestController, DTOs, mappers
+    │                        # user/ — UserController
+    │                        # image/ — ImageController
+    │                        # health/ — HealthCheckController
+    └── out/
+        ├── persistence/     # UserGateway implementation (future — database)
+        └── storage/         # ImageStorageGateway implementation (Supabase)
 ```
 
-**Key rules:**
-- `domain/` has zero Spring or JPA annotations — plain Java only.
-- `application/` depends only on `domain/` (input + output ports).
-- `adapter/` depends on `application/` and `domain/`; never the reverse.
-- Persistence JPA entities (`adapter/out/persistence/`) are separate from domain model classes (`domain/model/`). A mapper converts between them.
-- Input ports are interfaces; application services implement them.
-- Output ports are interfaces; persistence adapters implement them.
+## Features
 
-Configuration lives in `src/main/resources/application.properties`. Database connection (`spring.datasource.*`) must be configured before the app can start.
+**User CRUD** (`adapter/in/http/user/`)
+- `POST   /users`
+- `GET    /users/:id`
+- `PUT    /users/:id`
+- `DELETE /users/:id`
 
-## Testing
+**Permissions** (`adapter/in/http/permission/`)
+- `POST   /users/:id/permissions`
+- `DELETE /users/:id/permissions/:permissionId`
 
-- **Domain / application layer** — plain JUnit 5, no Spring context needed.
-- **Web adapter** — `@WebMvcTest` + mock the input port with `@MockBean`.
-- **Persistence adapter** — `@DataJpaTest` against an in-memory or test database.
+**Images — Supabase Storage** (`adapter/in/http/image/`)
+- `GET    /images`         — list images from bucket
+- `POST   /images`         — upload image to Supabase
+- `DELETE /images/:name`   — remove image from Supabase
 
-Test source root: `src/test/java/com/tocarol/api/`.
+**Health**
+- `GET    /health`
+
+## Layer Rules
+
+**`domain/`**
+- Zero Spring annotations — plain Java only.
+- No knowledge of HTTP, Supabase, or any external provider.
+- Entities: `User`, `Permission`, `Image`.
+- Input ports: one interface per use case (e.g. `CreateUserUseCase`).
+- Output ports: gateway interfaces (e.g. `UserGateway`, `ImageStorageGateway`).
+
+**`application/`**
+- Annotated with `@Service`.
+- Implements input ports.
+- Depends only on `domain/` — never on `adapter/`.
+- No HTTP or I/O logic here.
+
+**`adapter/in/http/`**
+- Annotated with `@RestController`.
+- Injects input port interfaces — never use case classes directly.
+- DTOs live here — never in `domain/`.
+- No business logic — delegate everything to use cases.
+- Return `ResponseEntity<T>` always.
+
+**`adapter/out/storage/`**
+- Implements `ImageStorageGateway`.
+- All Supabase HTTP calls live here.
+- Maps Supabase responses to domain model.
+
+## Testing Strategy
+
+| Layer | Tool | Spring Context |
+|---|---|---|
+| Domain / Application | JUnit 5 + Mockito | No |
+| HTTP Adapter | `@WebMvcTest` + `@MockBean` | Partial |
+| Storage Adapter | JUnit 5 + HTTP mock | No |
+
+- Domain and application tests are plain Java — fast, no Spring context.
+- Controllers are tested with `@WebMvcTest`, mocking input ports.
+- Never test implementation — test behavior through ports.
+
+## Code Style
+
+- One class per file.
+- Constructor injection only — no `@Autowired` on fields.
+- Prefer `final` fields.
+- No business logic in controllers.
+- No framework annotations in `domain/`.
+- Domain exceptions are caught at the adapter layer — never leak as HTTP 500.
+- DTOs are immutable — use records when possible.
+
+## Gotchas
+
+- `application-local.properties` is gitignored — new devs must create it manually.
+- Supabase client lives only in `adapter/out/storage/` — never leak it to domain or application.
+- When adding a new feature: define the port first, then the use case, then the adapter.
