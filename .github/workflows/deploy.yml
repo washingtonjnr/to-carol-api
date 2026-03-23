@@ -1,53 +1,32 @@
 name: Deploy 
 
+env:
+  RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+  RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+  
 on:
-  workflow_run:
-    workflows: ["Build", "Test"]
-    types:
-      - completed
+  push:
+    branches: [main, develop]
 
 jobs:
-  deploy:
-    if: ${{ 
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main'
-    }}
+  test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check both workflows status
-        uses: actions/github-script@v7
-        id: check
+      - uses: actions/checkout@v4
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
-          script: |
-            const { owner, repo } = context.repo;
-            const sha = context.payload.workflow_run.head_sha;
+          java-version: '21'
+          distribution: 'temurin'
 
-            const runs = await github.rest.actions.listWorkflowRunsForRepo({
-              owner,
-              repo,
-              head_sha: sha,
-            });
+      - name: Run tests
+        run: mvn test
 
-            const required = ["Build", "Test"];
-
-            const statusMap = {};
-
-            for (const run of runs.data.workflow_runs) {
-              if (required.includes(run.name)) {
-                statusMap[run.name] = run.conclusion;
-              }
-            }
-
-            const allPassed = required.every(
-              name => statusMap[name] === "success"
-            );
-
-            if (!allPassed) {
-              core.setFailed(`Not all workflows passed: ${JSON.stringify(statusMap)}`);
-            }
-
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/checkout@v4
 
       - name: Install Railway CLI
@@ -55,6 +34,3 @@ jobs:
 
       - name: Deploy
         run: railway up --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
