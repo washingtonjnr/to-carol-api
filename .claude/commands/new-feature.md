@@ -1,82 +1,123 @@
-Create a complete new feature following hexagonal architecture for this Spring Boot API based on: $ARGUMENTS
+# Command: New Feature
 
-## Package structure to create
+Creates a complete feature following Hexagonal Architecture (Ports & Adapters).
 
-All files go under `src/main/java/com/tocarol/api/<featureName>/`:
+## Usage
 
 ```
-<featureName>/
-├── domain/
-│   ├── model/           <FeatureName>.java          ← pure Java, no annotations
-│   ├── port/
-│   │   ├── in/          Create<FeatureName>UseCase.java
-│   │   │                Update<FeatureName>UseCase.java
-│   │   │                Delete<FeatureName>UseCase.java
-│   │   │                Find<FeatureName>UseCase.java
-│   │   │                
-│   │   └── out/         <FeatureName>Repository.java
-│   │
-│   └── service/         (optional domain service if needed)
-│
-├── application/
-│   └── service/         <FeatureName>Service.java
-└── adapter/
-    ├── in/web/          <FeatureName>Controller.java
-    │                    <FeatureName>Request.java
-    │                    <FeatureName>Response.java
-    │                    <FeatureName>Mapper.java
-    │                    
-    └── out/persistence/ <FeatureName>JpaEntity.java
-                         <FeatureName>JpaRepository.java
-                         <FeatureName>PersistenceAdapter.java
-                         <FeatureName>PersistenceMapper.java
+/new-feature <verb> <name> [scope] (optional notes)
 ```
 
-## Step-by-step instructions
+### Examples
 
-### 1. Domain model (`domain/model/`)
-- Plain Java class with fields inferred from the description
-- No `@Entity`, no Spring annotations
-- Private fields, constructor, getters (immutable where possible)
+```
+/new-feature create health-check
+/new-feature get pictures [all files]
+/new-feature create user (validate email format and reject duplicates)
+/new-feature get pictures [all files] (create a generic provider and a SupabaseProvider for DI — so in the future we can swap Supabase for S3 or similar)
+```
 
-### 2. Output port (`domain/port/out/`)
-- Interface `<FeatureName>Repository` with methods: `save`, `findById`, `findAll`, `deleteById`
+---
 
-### 3. Input ports (`domain/port/in/`)
-- One interface per use case, each with a single method
-- Use a nested `Command` record inside the interface for input data
+## Argument Reference
 
-### 4. Application service (`application/service/`)
-- `@Service` class implementing all input port interfaces
-- Constructor-inject the output port (`<FeatureName>Repository`)
-- Throw `EntityNotFoundException` (or similar) when not found
-- No JPA, no HTTP concepts here
+| Argument | Required | Description |
+|---|---|---|
+| `verb` | Yes | HTTP intent: `create`, `get`, `update`, `delete`, `upload`, `list` |
+| `name` | Yes | Feature name in kebab-case: `health-check`, `pictures`, `user` |
+| `[scope]` | No | Clarifies what the operation targets: `[all files]`, `[by id]`, `[by user]` |
+| `(notes)` | No | Free-text instructions — architecture decisions, patterns, constraints |
 
-### 5. Persistence adapter (`adapter/out/persistence/`)
-- `<FeatureName>JpaEntity`: `@Entity` + `@Table` JPA class
-- `<FeatureName>JpaRepository`: `JpaRepository<JpaEntity, Long>`
-- `<FeatureName>PersistenceAdapter`: `@Component` implementing the output port, uses JpaRepository + mapper
-- `<FeatureName>PersistenceMapper`: maps between domain model ↔ JPA entity
+---
 
-### 6. Web adapter (`adapter/in/web/`)
-- `<FeatureName>Controller`: `@RestController`, `@RequestMapping("/api/<feature-plural>")`
-  - `GET /` → 200 list
-  - `GET /{id}` → 200 or 404
-  - `POST /` → 201
-  - `PUT /{id}` → 200 or 404
-  - `DELETE /{id}` → 204
-- Inject only input port interfaces, never the application service class directly
-- `<FeatureName>Request` / `<FeatureName>Response`: records for HTTP I/O
-- `<FeatureName>Mapper`: maps request → command, domain model → response
+## What gets generated
 
-### 7. Tests (`src/test/java/com/tocarol/api/<featureName>/`)
-- `<FeatureName>ServiceTest`: plain JUnit 5 + Mockito, no Spring context
-- `<FeatureName>ControllerTest`: `@WebMvcTest`, mock input ports with `@MockBean`
-- `<FeatureName>PersistenceAdapterTest`: `@DataJpaTest`
+When no `(notes)` are provided, generate the full hexagonal flow for the given verb + name:
 
-## Conventions
-- Constructor injection only — no `@Autowired` on fields
-- Domain layer has zero Spring/JPA imports
-- `Long` as primary key type
-- snake_case table and column names via `@Table`/`@Column`
-- `FetchType.LAZY` on all relationships
+### Full flow (default)
+
+**1. Domain — `domain/model/`**
+- Pure Java class representing the entity (no annotations).
+
+**2. Input Port — `domain/port/in/`**
+- Interface named `<Verb><Name>UseCase`.
+- Single method `execute(input)` returning the domain model or void.
+
+**3. Output Port — `domain/port/out/`** *(if the feature needs external data)*
+- Interface named `<Name>Gateway` or `<Name>Repository`.
+- Methods: `save`, `findById`, `findAll`, `delete` — only what the feature needs.
+
+**4. Use Case — `application/usecase/<name>/`**
+- Class named `<Verb><Name>Service`.
+- Annotated with `@Service`.
+- Implements the input port.
+- Constructor injection of output port interface.
+
+**5. HTTP Adapter — `adapter/in/http/<name>/`**
+- `<Name>Controller` annotated with `@RestController`.
+- Injects input port interface — never the use case class directly.
+- Request/Response DTOs as Java records.
+- Returns `ResponseEntity<T>`.
+- Correct HTTP status: `200`, `201`, `204`, `404`.
+
+**6. Exception** *(if applicable)*
+- `<Name>NotFoundException` in `domain/exception/`.
+
+**7. Test stubs**
+- Use case test: plain JUnit 5 + Mockito, no Spring.
+- Controller test: `@WebMvcTest` + `@MockBean`.
+
+---
+
+## Behavior with `(notes)`
+
+When `(notes)` are provided, read them carefully and adjust the generated flow accordingly.
+
+### Common patterns from notes
+
+**"create a generic provider + concrete implementation"**
+→ Generate an output port interface (e.g. `StorageProvider`) + a concrete adapter (e.g. `SupabaseStorageProvider`) in `adapter/out/storage/`.
+→ Name the interface generically so it can be swapped (S3, GCS, etc.) without touching domain or application.
+
+**"no persistence needed"**
+→ Skip output port and gateway. Use case operates on domain logic only.
+
+**"reuse existing gateway"**
+→ Do not create a new output port. Inject the existing one in the new use case.
+
+**"validate X"**
+→ Add validation logic in the use case — never in the controller.
+→ Throw a domain exception if validation fails.
+
+**"return only public fields"**
+→ Create a response DTO that excludes sensitive fields. Map from domain model in the controller.
+
+---
+
+## Rules (always apply)
+
+- `domain/` has zero Spring or external annotations.
+- Output ports are interfaces — concrete implementations live in `adapter/out/`.
+- Controllers inject input port interfaces — never use case classes.
+- DTOs are Java records — immutable by default.
+- One class per file.
+- Constructor injection only — no `@Autowired` on fields.
+- Domain exceptions are mapped to HTTP responses in the controller — never leak as 500.
+
+---
+
+## Output format
+
+For each generated file, show:
+1. Full file path.
+2. Complete file content.
+3. One-line explanation of its role in the flow.
+
+After all files, show a summary:
+
+```
+Feature: <name>
+Endpoint: <METHOD> /<route>
+Flow: Controller → <InputPort> → <UseCase> → <OutputPort> → <Adapter>
+Files created: N
+```
