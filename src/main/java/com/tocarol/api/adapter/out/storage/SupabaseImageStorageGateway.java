@@ -33,6 +33,10 @@ public class SupabaseImageStorageGateway implements ImageStoragePort {
     }
     @Override
     public List<Image> listAll() {
+        System.out.println("SUPABASE_URL: " + supabaseUrl);
+        System.out.println("SUPABASE_KEY: " + (supabaseKey.isEmpty() ? "VAZIA!" : "OK"));
+        System.out.println("BUCKET: " + (bucket.isEmpty() ? "VAZIO!" : bucket));
+        
         String url = supabaseUrl + "/storage/v1/object/list/" + bucket;
         Map<String, String> headers = Map.of("Authorization", "Bearer " + supabaseKey);
         Map<String, Object> body = Map.of("prefix", "", "limit", 100, "offset", 0);
